@@ -12,7 +12,6 @@
         h1 { color: #2c3e50; text-align: center; margin-bottom: 5px; }
         .status-msg { text-align: center; color: #7f8c8d; margin-bottom: 20px; font-size: 0.9em; }
         
-        /* Menu de abas */
         .tabs { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
         .tab-btn { padding: 12px 25px; border: 2px solid #3498db; background: white; color: #3498db; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.3s; }
         .tab-btn.active { background-color: #3498db; color: white; }
@@ -33,7 +32,7 @@
 
 <div class="container">
     <h1>Controle de Soltura e Recolhe</h1>
-    <p class="status-msg">Selecione a unidade operacional abaixo</p>
+    <p class="status-msg">Selecione a unidade operacional para carregar os dados</p>
 
     <div class="tabs">
         <button class="tab-btn active" onclick="changeUnit('TCCC', this)">TCCC</button>
@@ -50,10 +49,20 @@
 </div>
 
 <script>
+    // Configuração com URLs e as garagens específicas de cada empresa
     const CONFIG = {
-        'TCCC': 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTnT2K7KGf-Tr8vC_E4gTgovxgxDNRkUtMAWZv2gHkUdrQDxNaMAUO_I-4tXeV1eSAa2FFH7_k-VD9p/pub?gid=0&single=true&output=csv',
-        'Sarandi': 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQlcfMc6yPrGS_vz8uxhizzJqdJop8l8MDoz0ADimr-iUh1wYWbeXKjC8JsJ5AGtjJEDA73-9qFztuN/pub?gid=0&single=true&output=csv',
-        'Paicandu': 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRNkqhIpFFWlmqXb6mhe-Nz3dVwhTNG_5SunqJKDFDlSBAwc2Vlw2EYaxwnSmVPf1yoPjvsbXF4EicQ/pub?gid=0&single=true&output=csv'
+        'TCCC': {
+            url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTnT2K7KGf-Tr8vC_E4gTgovxgxDNRkUtMAWZv2gHkUdrQDxNaMAUO_I-4tXeV1eSAa2FFH7_k-VD9p/pub?gid=0&single=true&output=csv',
+            garagens: ['G-NOR', 'G-SUL', 'GNORT', 'GSUL']
+        },
+        'Sarandi': {
+            url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQlcfMc6yPrGS_vz8uxhizzJqdJop8l8MDoz0ADimr-iUh1wYWbeXKjC8JsJ5AGtjJEDA73-9qFztuN/pub?gid=0&single=true&output=csv',
+            garagens: ['G-SAR', 'GSAR', 'G-SUL']
+        },
+        'Paicandu': {
+            url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRNkqhIpFFWlmqXb6mhe-Nz3dVwhTNG_5SunqJKDFDlSBAwc2Vlw2EYaxwnSmVPf1yoPjvsbXF4EicQ/pub?gid=0&single=true&output=csv',
+            garagens: ['G-PAI', 'GPAI', 'G-SUL']
+        }
     };
 
     let currentUnit = 'TCCC';
@@ -63,7 +72,7 @@
         currentUnit = unit;
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        document.getElementById('unit-name').innerText = unit;
+        document.getElementById('unit-name').innerText = unit === 'Paicandu' ? 'Paiçandu' : unit;
         fetchData();
     }
 
@@ -76,7 +85,7 @@
         exportBtn.style.display = 'none';
         document.getElementById('table-container').innerHTML = '';
 
-        Papa.parse(CONFIG[currentUnit], {
+        Papa.parse(CONFIG[currentUnit].url, {
             download: true,
             header: true,
             skipEmptyLines: true,
@@ -99,7 +108,8 @@
     }
 
     function processData(data) {
-        const locaisRecolhe = ['G-NOR', 'G-SUL', 'E-TER'];
+        const garagensEmpresa = CONFIG[currentUnit].garagens;
+        const locaisRecolhe = [...garagensEmpresa, 'E-TER'];
         
         data.forEach(row => {
             row.TripNum = row['Tripulante'] ? row['Tripulante'].replace(/\D/g, '') : "0";
@@ -107,9 +117,10 @@
             row.FimClean = cleanTime(row['Fim']);
         });
 
+        // Filtra solturas usando as garagens da empresa selecionada
         let solturas = data.filter(row => 
             row['Evento'] === 'Deslocamento' && 
-            ['G-NOR', 'G-SUL'].includes(row['Origem']) &&
+            garagensEmpresa.includes(row['Origem']) &&
             row.IniClean >= '01:00' && row.IniClean <= '07:20'
         );
 
@@ -125,6 +136,7 @@
 
             let destinoFinal = recolhe ? recolhe['Destino'] : "-";
 
+            // Regra da Intra-jornada (Tempo)
             if (destinoFinal === 'E-TER') {
                 let temIntraLonga = data.find(r => 
                     r.TripNum === solt.TripNum &&
