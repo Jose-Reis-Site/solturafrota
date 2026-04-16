@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Relatório de Soltura e Recolhe TCCC - Automático</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: #f4f7f6; color: #333; }
+        .container { max-width: 1100px; margin: auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; text-align: center; margin-bottom: 10px; }
+        .status-msg { text-align: center; color: #7f8c8d; margin-bottom: 20px; font-style: italic; }
+        .actions { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
+        button { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        .btn-excel { background-color: #27ae60; color: white; display: none; }
+        .btn-excel:hover { background-color: #219150; }
+        .btn-refresh { background-color: #3498db; color: white; }
+        .btn-refresh:hover { background-color: #2980b9; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+        th { background-color: #2c3e50; color: white; padding: 12px; text-align: left; }
+        td { padding: 10px; border-bottom: 1px solid #ddd; }
+        tr:hover { background-color: #f9f9f9; }
+        .status-rodando { color: #e67e22; font-weight: bold; }
+        #loading { text-align: center; font-weight: bold; color: #2c3e50; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Relatório Automático de Soltura e Recolhe</h1>
+    <p class="status-msg">Sincronizado com Google Sheets</p>
+
+    <div class="actions">
+        <button class="btn-refresh" onclick="fetchData()">Atualizar Dados</button>
+        <button class="btn-excel" id="export-btn">Baixar Relatório em Excel</button>
+    </div>
+
+    <div id="loading" style="display: none;">Carregando dados da nuvem...</div>
+    <div id="table-container"></div>
+</div>
+
+<script>
+    // URL convertida para exportação de CSV automática
+    const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTnT2K7KGf-Tr8vC_E4gTgovxgxDNRkUtMAWZv2gHkUdrQDxNaMAUO_I-4tXeV1eSAa2FFH7_k-VD9p/pub?gid=0&single=true&output=csv';
+    
+    let dadosProcessados = [];
+    const exportBtn = document.getElementById('export-btn');
+    const loadingDiv = document.getElementById('loading');
+
+    // Carrega automaticamente ao abrir a página
+    window.addEventListener('DOMContentLoaded', fetchData);
+
+    function fetchData() {
+        loadingDiv.style.display = 'block';
+        exportBtn.style.display = 'none';
+        document.getElementById('table-container').innerHTML = '';
+
+        Papa.parse(CSV_URL, {
+            download: true,
+            header: true,
+            skipEmptyLines: true,
+            complete: function(results) {
+                loadingDiv.style.display = 'none';
+                processData(results.data);
+            },
+            error: function(err) {
+                loadingDiv.style.display = 'none';
+                alert("Erro ao acessar a planilha do Google: " + err);
+            }
+        });
+    }
+
+    function cleanTime(t) {
+        if (!t) return "23:59";
+        let parts = t.split(':');
+        if (parts.length >= 2) {
+            return parts[0].padStart(2, '0') + ":" + parts[1].padStart(2, '0');
+        }
+        return "23:59";
+    }
+
+    function processData(data) {
+        const locaisRecolhe = ['G-NOR', 'G-SUL', 'E-TER'];
+        
+        data.forEach(row => {
+            row.TripNum = row['Tripulante'] ? row['Tripulante'].replace(/\D/g, '') : "0";
+            row.IniClean = cleanTime(row['Início']);
+            row.FimClean = cleanTime(row['Fim']);
+        });
+
+        let solturas = data.filter(row => 
+            row['Evento'] === 'Deslocamento' && 
+            ['G-NOR', 'G-SUL'].includes(row['Origem']) &&
+            row.IniClean >= '01:00' && row.IniClean <= '07:20'
+        );
+
+        let pares = [];
+
+        solturas.forEach(solt => {
+            let recolhe = data.find(r => 
+                r.TripNum === solt.TripNum &&
+                r['Veículo'] === solt['Veículo'] &&
+                r['Evento'] === 'Deslocamento' &&
+                locaisRecolhe.includes(r['Destino']) &&
+                r.FimClean > solt.IniClean
+            );
+
+            let destinoOriginal = recolhe ? recolhe['Destino'] : "-";
+            let destinoFinal = destinoOriginal;
+
+            if (destinoOriginal === 'E-TER') {
+                let temIntraLonga = data.find(r => 
+                    r.TripNum === solt.TripNum &&
+                    r['Evento'] === 'Intra-jornada não remunerada padrão' &&
+                    (r['Tempo'] || r['Duração']) > '02:10'
+                );
+
+                if (temIntraLonga) {
+                    destinoFinal = "Tempo";
+                }
+            }
+
+            pares.push({
+                Tripulante: solt.TripNum,
+                Início: solt.IniClean,
+                Fim: recolhe ? recolhe.FimClean : "Rodando",
+                Linha: solt['Linha'],
+                Veículo: solt['Veículo'],
+                Origem: solt['Origem'],
+                Destino: destinoFinal
+            });
+        });
+
+        let grupos = {};
+        pares.forEach(p => {
+            let key = p.Tripulante + "_" + p.Veículo;
+            if (!grupos[key]) grupos[key] = [];
+            grupos[key].push(p);
+        });
+
+        dadosProcessados = [];
+        for (let key in grupos) {
+            let g = grupos[key].sort((a, b) => a.Início.localeCompare(b.Início));
+            let temRodando = g.some(x => x.Fim === "Rodando");
+            
+            if (temRodando) {
+                dadosProcessados.push({
+                    Tripulante: g[0].Tripulante,
+                    Início: g[0].Início,
+                    Fim: "Rodando",
+                    Linha: g[0].Linha,
+                    Veículo: g[0].Veículo,
+                    Origem: g[0].Origem,
+                    Destino: "-"
+                });
+            } else {
+                dadosProcessados.push({
+                    Tripulante: g[0].Tripulante,
+                    Início: g[0].Início,
+                    Fim: g[g.length - 1].Fim,
+                    Linha: g[0].Linha,
+                    Veículo: g[0].Veículo,
+                    Origem: g[0].Origem,
+                    Destino: g[g.length - 1].Destino
+                });
+            }
+        }
+
+        dadosProcessados.sort((a,b) => parseInt(a.Tripulante) - parseInt(b.Tripulante));
+        renderTable();
+        exportBtn.style.display = 'block';
+    }
+
+    function renderTable() {
+        let html = `<table><thead><tr>
+            <th>Tripulante</th><th>Início</th><th>Fim</th><th>Linha</th><th>Veículo</th><th>Origem</th><th>Destino</th>
+            </tr></thead><tbody>`;
+        
+        dadosProcessados.forEach(row => {
+            html += `<tr>
+                <td>${row.Tripulante}</td>
+                <td>${row.Início}</td>
+                <td class="${row.Fim === 'Rodando' ? 'status-rodando' : ''}">${row.Fim}</td>
+                <td>${row.Linha}</td>
+                <td>${row.Veículo}</td>
+                <td>${row.Origem}</td>
+                <td>${row.Destino}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        document.getElementById('table-container').innerHTML = html;
+    }
+
+    document.getElementById('export-btn').addEventListener('click', () => {
+        const ws = XLSX.utils.json_to_sheet(dadosProcessados);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Relatorio");
+        XLSX.writeFile(wb, "Relatorio_Soltura_TCCC.xlsx");
+    });
+</script>
+
+</body>
+</html>
