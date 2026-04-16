@@ -3,60 +3,80 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Relatório de Soltura e Recolhe TCCC - Automático</title>
+    <title>Relatório de Soltura - Multi-Empresa</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: #f4f7f6; color: #333; }
         .container { max-width: 1100px; margin: auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #2c3e50; text-align: center; margin-bottom: 10px; }
-        .status-msg { text-align: center; color: #7f8c8d; margin-bottom: 20px; font-style: italic; }
+        h1 { color: #2c3e50; text-align: center; margin-bottom: 5px; }
+        .status-msg { text-align: center; color: #7f8c8d; margin-bottom: 20px; font-size: 0.9em; }
+        
+        /* Menu de abas */
+        .tabs { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+        .tab-btn { padding: 12px 25px; border: 2px solid #3498db; background: white; color: #3498db; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        .tab-btn.active { background-color: #3498db; color: white; }
+        .tab-btn:hover { background-color: #ebf5fb; }
+
         .actions { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
-        button { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.3s; }
-        .btn-excel { background-color: #27ae60; color: white; display: none; }
-        .btn-excel:hover { background-color: #219150; }
-        .btn-refresh { background-color: #3498db; color: white; }
-        .btn-refresh:hover { background-color: #2980b9; }
+        button.download-btn { background-color: #27ae60; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; display: none; }
+        
         table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
-        th { background-color: #2c3e50; color: white; padding: 12px; text-align: left; }
+        th { background-color: #2c3e50; color: white; padding: 12px; text-align: left; position: sticky; top: 0; }
         td { padding: 10px; border-bottom: 1px solid #ddd; }
         tr:hover { background-color: #f9f9f9; }
         .status-rodando { color: #e67e22; font-weight: bold; }
-        #loading { text-align: center; font-weight: bold; color: #2c3e50; }
+        #loading { text-align: center; font-weight: bold; color: #2c3e50; margin: 20px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>Relatório Automático de Soltura e Recolhe</h1>
-    <p class="status-msg">Sincronizado com Google Sheets</p>
+    <h1>Controle de Soltura e Recolhe</h1>
+    <p class="status-msg">Selecione a unidade operacional abaixo</p>
 
-    <div class="actions">
-        <button class="btn-refresh" onclick="fetchData()">Atualizar Dados</button>
-        <button class="btn-excel" id="export-btn">Baixar Relatório em Excel</button>
+    <div class="tabs">
+        <button class="tab-btn active" onclick="changeUnit('TCCC', this)">TCCC</button>
+        <button class="tab-btn" onclick="changeUnit('Sarandi', this)">Sarandi</button>
+        <button class="tab-btn" onclick="changeUnit('Paicandu', this)">Paiçandu</button>
     </div>
 
-    <div id="loading" style="display: none;">Carregando dados da nuvem...</div>
+    <div class="actions">
+        <button class="download-btn" id="export-btn">Baixar Excel (<span id="unit-name">TCCC</span>)</button>
+    </div>
+
+    <div id="loading" style="display: none;">Buscando dados na nuvem...</div>
     <div id="table-container"></div>
 </div>
 
 <script>
-    // URL convertida para exportação de CSV automática
-    const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTnT2K7KGf-Tr8vC_E4gTgovxgxDNRkUtMAWZv2gHkUdrQDxNaMAUO_I-4tXeV1eSAa2FFH7_k-VD9p/pub?gid=0&single=true&output=csv';
-    
-    let dadosProcessados = [];
-    const exportBtn = document.getElementById('export-btn');
-    const loadingDiv = document.getElementById('loading');
+    const CONFIG = {
+        'TCCC': 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTnT2K7KGf-Tr8vC_E4gTgovxgxDNRkUtMAWZv2gHkUdrQDxNaMAUO_I-4tXeV1eSAa2FFH7_k-VD9p/pub?gid=0&single=true&output=csv',
+        'Sarandi': 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQlcfMc6yPrGS_vz8uxhizzJqdJop8l8MDoz0ADimr-iUh1wYWbeXKjC8JsJ5AGtjJEDA73-9qFztuN/pub?gid=0&single=true&output=csv',
+        'Paicandu': 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRNkqhIpFFWlmqXb6mhe-Nz3dVwhTNG_5SunqJKDFDlSBAwc2Vlw2EYaxwnSmVPf1yoPjvsbXF4EicQ/pub?gid=0&single=true&output=csv'
+    };
 
-    // Carrega automaticamente ao abrir a página
+    let currentUnit = 'TCCC';
+    let dadosProcessados = [];
+
+    function changeUnit(unit, btn) {
+        currentUnit = unit;
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('unit-name').innerText = unit;
+        fetchData();
+    }
+
     window.addEventListener('DOMContentLoaded', fetchData);
 
     function fetchData() {
+        const loadingDiv = document.getElementById('loading');
+        const exportBtn = document.getElementById('export-btn');
         loadingDiv.style.display = 'block';
         exportBtn.style.display = 'none';
         document.getElementById('table-container').innerHTML = '';
 
-        Papa.parse(CSV_URL, {
+        Papa.parse(CONFIG[currentUnit], {
             download: true,
             header: true,
             skipEmptyLines: true,
@@ -66,7 +86,7 @@
             },
             error: function(err) {
                 loadingDiv.style.display = 'none';
-                alert("Erro ao acessar a planilha do Google: " + err);
+                alert("Erro ao carregar dados: " + err);
             }
         });
     }
@@ -74,9 +94,7 @@
     function cleanTime(t) {
         if (!t) return "23:59";
         let parts = t.split(':');
-        if (parts.length >= 2) {
-            return parts[0].padStart(2, '0') + ":" + parts[1].padStart(2, '0');
-        }
+        if (parts.length >= 2) return parts[0].padStart(2, '0') + ":" + parts[1].padStart(2, '0');
         return "23:59";
     }
 
@@ -96,7 +114,6 @@
         );
 
         let pares = [];
-
         solturas.forEach(solt => {
             let recolhe = data.find(r => 
                 r.TripNum === solt.TripNum &&
@@ -106,29 +123,22 @@
                 r.FimClean > solt.IniClean
             );
 
-            let destinoOriginal = recolhe ? recolhe['Destino'] : "-";
-            let destinoFinal = destinoOriginal;
+            let destinoFinal = recolhe ? recolhe['Destino'] : "-";
 
-            if (destinoOriginal === 'E-TER') {
+            if (destinoFinal === 'E-TER') {
                 let temIntraLonga = data.find(r => 
                     r.TripNum === solt.TripNum &&
                     r['Evento'] === 'Intra-jornada não remunerada padrão' &&
                     (r['Tempo'] || r['Duração']) > '02:10'
                 );
-
-                if (temIntraLonga) {
-                    destinoFinal = "Tempo";
-                }
+                if (temIntraLonga) destinoFinal = "Tempo";
             }
 
             pares.push({
-                Tripulante: solt.TripNum,
-                Início: solt.IniClean,
+                Tripulante: solt.TripNum, Início: solt.IniClean,
                 Fim: recolhe ? recolhe.FimClean : "Rodando",
-                Linha: solt['Linha'],
-                Veículo: solt['Veículo'],
-                Origem: solt['Origem'],
-                Destino: destinoFinal
+                Linha: solt['Linha'], Veículo: solt['Veículo'],
+                Origem: solt['Origem'], Destino: destinoFinal
             });
         });
 
@@ -144,32 +154,20 @@
             let g = grupos[key].sort((a, b) => a.Início.localeCompare(b.Início));
             let temRodando = g.some(x => x.Fim === "Rodando");
             
-            if (temRodando) {
-                dadosProcessados.push({
-                    Tripulante: g[0].Tripulante,
-                    Início: g[0].Início,
-                    Fim: "Rodando",
-                    Linha: g[0].Linha,
-                    Veículo: g[0].Veículo,
-                    Origem: g[0].Origem,
-                    Destino: "-"
-                });
-            } else {
-                dadosProcessados.push({
-                    Tripulante: g[0].Tripulante,
-                    Início: g[0].Início,
-                    Fim: g[g.length - 1].Fim,
-                    Linha: g[0].Linha,
-                    Veículo: g[0].Veículo,
-                    Origem: g[0].Origem,
-                    Destino: g[g.length - 1].Destino
-                });
-            }
+            dadosProcessados.push({
+                Tripulante: g[0].Tripulante,
+                Início: g[0].Início,
+                Fim: temRodando ? "Rodando" : g[g.length - 1].Fim,
+                Linha: g[0].Linha,
+                Veículo: g[0].Veículo,
+                Origem: g[0].Origem,
+                Destino: temRodando ? "-" : g[g.length - 1].Destino
+            });
         }
 
         dadosProcessados.sort((a,b) => parseInt(a.Tripulante) - parseInt(b.Tripulante));
         renderTable();
-        exportBtn.style.display = 'block';
+        document.getElementById('export-btn').style.display = 'block';
     }
 
     function renderTable() {
@@ -196,7 +194,7 @@
         const ws = XLSX.utils.json_to_sheet(dadosProcessados);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Relatorio");
-        XLSX.writeFile(wb, "Relatorio_Soltura_TCCC.xlsx");
+        XLSX.writeFile(wb, `Soltura_${currentUnit}.xlsx`);
     });
 </script>
 
